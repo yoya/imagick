@@ -25,7 +25,7 @@ func RelinquishMemory(ptr unsafe.Pointer) {
 func RelinquishMemoryCStringArray(p **C.char) {
 	defer RelinquishMemory(unsafe.Pointer(p))
 	for *p != nil {
-		RelinquishMemory(unsafe.Pointer(p))
+		RelinquishMemory(unsafe.Pointer(*p))
 		q := uintptr(unsafe.Pointer(p))
 		q += unsafe.Sizeof(q)
 		p = (**C.char)(unsafe.Pointer(q))
