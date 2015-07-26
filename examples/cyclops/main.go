@@ -2,7 +2,7 @@
 package main
 
 import (
-	"github.com/gographics/imagick/imagick"
+	"github.com/yoya/imagick/imagick"
 	"os"
 )
 
@@ -34,7 +34,7 @@ func main() {
 	mw.FloodfillPaintImage(channel, fg, 20, bg, 0, 0, false)
 	mw.ShaveImage(1, 1)
 
-	mw.DisplayImage(os.Getenv("DYSPLAY"))
+	mw.DisplayImage(os.Getenv("DISPLAY"))
 	if err != nil {
 		panic(err)
 	}

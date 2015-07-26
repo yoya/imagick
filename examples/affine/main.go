@@ -2,7 +2,8 @@
 package main
 
 import (
-	"github.com/gographics/imagick/imagick"
+	"github.com/yoya/imagick/imagick"
+	// "github.com/gographics/imagick/imagick"
 	"math"
 )
 

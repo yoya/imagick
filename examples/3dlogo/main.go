@@ -2,7 +2,7 @@
 package main
 
 import (
-	"github.com/gographics/imagick/imagick"
+	"github.com/yoya/imagick/imagick"
 	"os"
 )
 
@@ -224,7 +224,7 @@ func main() {
 
 	mwf = mwc.MergeImageLayers(imagick.IMAGE_LAYER_FLATTEN)
 
-	if err := mwf.DisplayImage(os.Getenv("DYSPLAY")); err != nil {
+	if err := mwf.DisplayImage(os.Getenv("DISPLAY")); err != nil {
 		panic(err)
 	}
 }
