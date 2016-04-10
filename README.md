@@ -1,10 +1,22 @@
 # Go Imagick
 
+[![GoDoc](https://godoc.org/gopkg.in/gographics/imagick.v2/imagick?status.svg)](https://gopkg.in/gographics/imagick.v2/imagick)
+
 Go Imagick is a Go bind to ImageMagick's MagickWand C API.
 
-It was originally developed and tested with ImageMagick 6.8.5-4, however most official Unix or Linux distributions use older
-versions (6.7.7, 6.8.0, etc) so some features in Go Imagick's go1 branch are being commented out and will see the light when
-these ImageMagick distributions could easily be updated (from the devops PoV).
+We support two compatibility branches:
+
+```
+master (tag v2.x.x): >= ImageMagick 6.8.9
+legacy (tag v1.x.x): <= ImageMagick 6.8.8
+```
+
+They map, respectively, through gopkg.in:
+
+```
+gopkg.in/gographics/imagick.v2/imagick
+gopkg.in/gographics/imagick.v1/imagick
+```
 
 # Install
 
@@ -33,7 +45,7 @@ pkg-config --cflags --libs MagickWand
 Then go get it:
 
 ```
-go get github.com/gographics/imagick/imagick
+go get gopkg.in/gographics/imagick.v2/imagick
 ```
 
 ### Build tags
@@ -41,12 +53,8 @@ go get github.com/gographics/imagick/imagick
 If you want to specify CGO_CFLAGS/CGO_LDFLAGS manually at build time, such as for building statically or without pkg-config, you can use the "no_pkgconfig" build tag:
 
 ```
-go build -tags no_pkgconfig github.com/gographics/imagick/imagick
+go build -tags no_pkgconfig gopkg.in/gographics/imagick.v2/imagick
 ```
-
-# API Doc
-
-https://gowalker.org/github.com/gographics/imagick/imagick
 
 # Examples
 
@@ -55,6 +63,42 @@ The examples folder is full with usage examples ported from C ones found in here
 # Quick and partial example
 
 Since this is a CGO binding, Go GC does not manage memory allocated by the C API then is necessary to use Terminate() and Destroy() methods.
+But objects of MagickWand, DrawingWand, PixelIterator and PixelWand are managed by GO GC if you create them by constructors.
+
+```
+package main
+
+import "gopkg.in/gographics/imagick.v2/imagick"
+
+func main() {
+    imagick.Initialize()
+    defer imagick.Terminate()
+
+    mw := imagick.NewMagickWand()
+
+    ...
+}
+```
+
+If you use struct literals, you should free resources manually:
+
+```
+package main
+
+import "github.com/gographics/imagick/imagick"
+
+func main() {
+    imagick.Initialize()
+    defer imagick.Terminate()
+
+    mw := imagick.MagickWand{...}
+    defer mw.Destroy()
+
+    ...
+}
+```
+
+Both methods are compatible if constructor methods used:
 
 ```
 package main
@@ -67,6 +111,25 @@ func main() {
 
     mw := imagick.NewMagickWand()
     defer mw.Destroy()
+
+    ...
+}
+```
+
+But you should NOT mix two ways of object creation:
+```
+package main
+
+import "github.com/gographics/imagick/imagick"
+
+func main() {
+    imagick.Initialize()
+    defer imagick.Terminate()
+
+    mw1 := imagick.MagickWand{...}
+    defer mw1.Destroy()
+
+    mw2 := imagick.NewMagickWand()
 
     ...
 }

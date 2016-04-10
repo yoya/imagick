@@ -9,16 +9,28 @@ package imagick
 */
 import "C"
 import (
+	"runtime"
+	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
 type DrawingWand struct {
-	dw *C.DrawingWand
+	dw   *C.DrawingWand
+	init sync.Once
+}
+
+func newDrawingWand(cdw *C.DrawingWand) *DrawingWand {
+	dw := &DrawingWand{dw: cdw}
+	runtime.SetFinalizer(dw, Destroy)
+	dw.IncreaseCount()
+
+	return dw
 }
 
 // Returns a drawing wand required for all other methods in the API.
 func NewDrawingWand() *DrawingWand {
-	return &DrawingWand{C.NewDrawingWand()}
+	return newDrawingWand(C.NewDrawingWand())
 }
 
 // Clears resources associated with the drawing wand.
@@ -28,7 +40,7 @@ func (dw *DrawingWand) Clear() {
 
 // Makes an exact copy of the specified wand.
 func (dw *DrawingWand) Clone() *DrawingWand {
-	return &DrawingWand{C.CloneDrawingWand(dw.dw)}
+	return newDrawingWand(C.CloneDrawingWand(dw.dw))
 }
 
 // Frees all resources associated with the drawing wand. Once the drawing wand
@@ -37,10 +49,26 @@ func (dw *DrawingWand) Destroy() {
 	if dw.dw == nil {
 		return
 	}
-	dw.dw = C.DestroyDrawingWand(dw.dw)
-	relinquishMemory(unsafe.Pointer(dw.dw))
-	dw.dw = nil
 
+	dw.init.Do(func() {
+		dw.dw = C.DestroyDrawingWand(dw.dw)
+		relinquishMemory(unsafe.Pointer(dw.dw))
+		dw.dw = nil
+
+		dw.DecreaseCount()
+	})
+}
+
+// Increase DrawingWand ref counter and set according "can`t be terminated status"
+func (dw *DrawingWand) IncreaseCount() {
+	atomic.AddInt64(&drawingWandCounter, int64(1))
+	unsetCanTerminate()
+}
+
+// Decrease DrawingWand ref counter and set according "can be terminated status"
+func (dw *DrawingWand) DecreaseCount() {
+	atomic.AddInt64(&drawingWandCounter, int64(-1))
+	setCanTerminate()
 }
 
 // Adjusts the current affine transformation matrix with the specified affine
@@ -122,8 +150,8 @@ func (dw *DrawingWand) Circle(ox, oy, px, py float64) {
 // mw: Image to composite is obtained from this wand.
 //
 func (dw *DrawingWand) Composite(compose CompositeOperator, x, y, width, height float64, mw *MagickWand) error {
-	C.DrawComposite(dw.dw, C.CompositeOperator(compose), C.double(x), C.double(y), C.double(width), C.double(height), mw.mw)
-	return dw.GetLastError()
+	ok := C.DrawComposite(dw.dw, C.CompositeOperator(compose), C.double(x), C.double(y), C.double(width), C.double(height), mw.mw)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Draws color on image using the current fill color, starting at specified
@@ -224,8 +252,8 @@ func (dw *DrawingWand) GetFontFamily() string {
 
 // Gets the image X and Y resolution.
 func (dw *DrawingWand) GetFontResolution() (x, y float64, err error) {
-	C.DrawGetFontResolution(dw.dw, (*C.double)(&x), (*C.double)(&y))
-	err = dw.GetLastError()
+	ok := C.DrawGetFontResolution(dw.dw, (*C.double)(&x), (*C.double)(&y))
+	err = dw.getLastErrorIfFailed(ok)
 	return
 }
 
@@ -702,8 +730,8 @@ func (dw *DrawingWand) PopDefs() {
 
 // Terminates a pattern definition.
 func (dw *DrawingWand) PopPattern() error {
-	C.DrawPopPattern(dw.dw)
-	return dw.GetLastError()
+	ok := C.DrawPopPattern(dw.dw)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Starts a clip path definition which is comprized of any number of drawing
@@ -737,8 +765,8 @@ func (dw *DrawingWand) PushDefs() {
 func (dw *DrawingWand) PushPattern(patternId string, x, y, width, height float64) error {
 	cstr := C.CString(patternId)
 	defer C.free(unsafe.Pointer(cstr))
-	C.DrawPushPattern(dw.dw, cstr, C.double(x), C.double(y), C.double(width), C.double(height))
-	return dw.GetLastError()
+	ok := C.DrawPushPattern(dw.dw, cstr, C.double(x), C.double(y), C.double(width), C.double(height))
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Draws a rectangle given two coordinates and using the current stroke, stroke
@@ -797,8 +825,8 @@ func (dw *DrawingWand) SetBorderColor(borderWand *PixelWand) {
 func (dw *DrawingWand) SetClipPath(clipMaskId string) error {
 	cstr := C.CString(clipMaskId)
 	defer C.free(unsafe.Pointer(cstr))
-	C.DrawSetClipPath(dw.dw, cstr)
-	return dw.GetLastError()
+	ok := C.DrawSetClipPath(dw.dw, cstr)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Set the polygon fill rule to be used by the clipping path.
@@ -827,8 +855,8 @@ func (dw *DrawingWand) SetFillOpacity(opacity float64) {
 //
 // xRes, yRes: the image x and y resolutions
 func (dw *DrawingWand) SetFontResolution(xRes, yRes float64) error {
-	C.DrawSetFontResolution(dw.dw, C.double(xRes), C.double(yRes))
-	return dw.GetLastError()
+	ok := C.DrawSetFontResolution(dw.dw, C.double(xRes), C.double(yRes))
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Sets the opacity to use when drawing using the fill or stroke color or
@@ -845,8 +873,8 @@ func (dw *DrawingWand) SetOpacity(opacity float64) {
 func (dw *DrawingWand) SetFillPatternURL(fillUrl string) error {
 	cstr := C.CString(fillUrl)
 	defer C.free(unsafe.Pointer(cstr))
-	C.DrawSetFillPatternURL(dw.dw, cstr)
-	return dw.GetLastError()
+	ok := C.DrawSetFillPatternURL(dw.dw, cstr)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Sets the fill rule to use while drawing polygons.
@@ -858,16 +886,16 @@ func (dw *DrawingWand) SetFillRule(fillRule FillRule) {
 func (dw *DrawingWand) SetFont(fontName string) error {
 	csFontName := C.CString(fontName)
 	defer C.free(unsafe.Pointer(csFontName))
-	C.DrawSetFont(dw.dw, csFontName)
-	return dw.GetLastError()
+	ok := C.DrawSetFont(dw.dw, csFontName)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Sets the font family to use when annotating with text.
 func (dw *DrawingWand) SetFontFamily(fontFamily string) error {
 	csFontFamily := C.CString(fontFamily)
 	defer C.free(unsafe.Pointer(csFontFamily))
-	C.DrawSetFontFamily(dw.dw, csFontFamily)
-	return dw.GetLastError()
+	ok := C.DrawSetFontFamily(dw.dw, csFontFamily)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Sets the font pointsize to use when annotating with text.
@@ -912,8 +940,8 @@ func (dw *DrawingWand) SetStrokeColor(strokeWand *PixelWand) {
 func (dw *DrawingWand) SetStrokePatternURL(strokeUrl string) error {
 	csStrokeUrl := C.CString(strokeUrl)
 	defer C.free(unsafe.Pointer(csStrokeUrl))
-	C.DrawSetStrokePatternURL(dw.dw, csStrokeUrl)
-	return dw.GetLastError()
+	ok := C.DrawSetStrokePatternURL(dw.dw, csStrokeUrl)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Controls whether stroked outlines are antialiased. Stroked outlines are
@@ -934,15 +962,15 @@ func (dw *DrawingWand) SetStrokeAntialias(antialias bool) {
 // stroke dash array might contain the members 5 3 2.
 func (dw *DrawingWand) SetStrokeDashArray(dash []float64) error {
 	if len(dash) == 0 {
-		C.DrawSetStrokeDashArray(dw.dw, C.size_t(0), nil)
-		return dw.GetLastError()
+		ok := C.DrawSetStrokeDashArray(dw.dw, C.size_t(0), nil)
+		return dw.getLastErrorIfFailed(ok)
 	}
 	cdash := [1 << 16]C.double{}
 	for k, v := range dash {
 		cdash[k] = C.double(v)
 	}
-	C.DrawSetStrokeDashArray(dw.dw, C.size_t(len(dash)), (*C.double)(&cdash[0]))
-	return dw.GetLastError()
+	ok := C.DrawSetStrokeDashArray(dw.dw, C.size_t(len(dash)), (*C.double)(&cdash[0]))
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Specifies the offset into the dash pattern to start the dash.
@@ -1035,8 +1063,8 @@ func (dw *DrawingWand) SetTextUnderColor(underWand *PixelWand) {
 func (dw *DrawingWand) SetVectorGraphics(xml string) error {
 	csxml := C.CString(xml)
 	defer C.free(unsafe.Pointer(csxml))
-	C.DrawSetVectorGraphics(dw.dw, csxml)
-	return dw.GetLastError()
+	ok := C.DrawSetVectorGraphics(dw.dw, csxml)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Skews the current coordinate system in the horizontal direction.
@@ -1096,8 +1124,8 @@ func (dw *DrawingWand) PeekDrawingWand() *DrawInfo {
 // to pop more drawing wands than have been pushed, and it is proper form to
 // pop all drawing wands which have been pushed.
 func (dw *DrawingWand) PopDrawingWand() error {
-	C.PopDrawingWand(dw.dw)
-	return dw.GetLastError()
+	ok := C.PopDrawingWand(dw.dw)
+	return dw.getLastErrorIfFailed(ok)
 }
 
 // Clones the current drawing wand to create a new drawing wand. The original
@@ -1105,6 +1133,6 @@ func (dw *DrawingWand) PopDrawingWand() error {
 // wands are stored on a drawing wand stack. For every Pop there must have
 // already been an equivalent Push.
 func (dw *DrawingWand) PushDrawingWand() error {
-	C.PushDrawingWand(dw.dw)
-	return dw.GetLastError()
+	ok := C.PushDrawingWand(dw.dw)
+	return dw.getLastErrorIfFailed(ok)
 }
